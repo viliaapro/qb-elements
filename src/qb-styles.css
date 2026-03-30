@@ -1,0 +1,94 @@
+/*
+ * qb-styles.css
+ * Structural stylesheet for qb-* elements.
+ * FROZEN — do not modify unless explicitly instructed.
+ */
+
+:host {
+  display: block;
+}
+
+.qb-leaf {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+/* Ensure slotted content stretches to fill the slot container */
+::slotted(*) {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.qb-indent {
+  margin-left: 1rem;
+  padding-left: 0.75rem;
+  border-left: 2px solid;
+  margin-top: 0.5rem;
+}
+
+.qb-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  padding: 0.5rem;
+  border: 1px solid;
+  border-radius: 6px;
+}
+
+.qb-row > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.qb-union-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.qb-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.qb-field-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.qb-field-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.qb-actions {
+  margin-top: 0.5rem;
+}
+
+
+.qb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.qb-btn-add {
+  padding: 0 8px;
+}
+
+.qb-btn-close {
+  padding: 0 6px;
+}
+
+.qb-leaf-msg {
+  display: block;
+  font-size: 0.75rem;
+  min-height: 1lh;
+}

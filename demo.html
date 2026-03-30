@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>qb-elements demo</title>
+  <style>
+    body { max-width: 680px; margin: 40px auto; padding: 0 24px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; }
+    h1 { font-size: 1.1rem; margin-bottom: 1.5rem; }
+    input, select { font: inherit; font-size: 0.875rem; padding: 3px 6px; border: 1px solid #d0d7de; border-radius: 6px; }
+    .submit-row { margin-top: 1.5rem; display: flex; align-items: center; gap: 1rem; }
+    .validity-msg { font-size: 0.8rem; }
+    pre { margin-top: 1rem; padding: 1rem; background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; font-size: 0.8rem; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+<h1>Query Builder</h1>
+
+<!--
+  Union label text is now prepended to the first option key via setLabels,
+  demonstrating how to surface "Query type" inside the select itself.
+-->
+<qb-record>
+  <qb-field name="Query type">
+    <qb-union id="root" default="Simple search">
+      <qb-option key="Simple search">
+        <template>
+          <qb-leaf><input type="text" placeholder="Search…" required /></qb-leaf>
+        </template>
+      </qb-option>
+      <qb-option key="Filter list">
+        <template>
+          <qb-list min-items="1" initial-count="1">
+            <template>
+              <qb-record>
+                <qb-field name="field">
+                  <select>
+                    <option>name</option>
+                    <option>email</option>
+                    <option>created</option>
+                  </select>
+                </qb-field>
+                <qb-field name="operator">
+                  <select>
+                    <option>equals</option>
+                    <option>contains</option>
+                    <option>before</option>
+                    <option>after</option>
+                  </select>
+                </qb-field>
+                <qb-field name="value">
+                  <qb-leaf><input type="text" placeholder="Value…" required /></qb-leaf>
+                </qb-field>
+              </qb-record>
+            </template>
+          </qb-list>
+        </template>
+      </qb-option>
+      <qb-option key="By ID">
+        <template>
+          <qb-leaf><input type="number" placeholder="ID…" required min="1" /></qb-leaf>
+        </template>
+      </qb-option>
+    </qb-union>
+  </qb-field>
+</qb-record>
+
+<div class="submit-row">
+  <button id="submit">Submit</button>
+  <span class="validity-msg" id="validity-msg"></span>
+</div>
+<pre id="output" hidden></pre>
+
+<script>
+/**
+ * @viliaapro/qb-elements
+ * Query Builder Web Components
+ * https://github.com/viliaapro/qb-elements
+ *
+ * Six custom elements:
+ *   <qb-union>   — discriminated sum: <select> revealing one branch
+ *   <qb-list>    — homogeneous sequence with add/remove
+ *   <qb-record>  — product: fixed named fields
+ *   <qb-option>  — inert, child of <qb-union>
+ *   <qb-field>   — field with label, child of <qb-record>
+ *   <qb-leaf>    — optional wrapper for a native input; shows validationMessage
+ *
+ * value protocol (hybrid algebraic shape):
+ *   qb-union  → { selected: string, value: unknown }
+ *   qb-list   → unknown[]
+ *   qb-record → Record<string, unknown>
+ *   native input/select/textarea → string | boolean
+ *
+ * validity protocol:
+ *   checkValidity()   — recursive AND over subtree; fires invalid events on leaves
+ *   validationMessage — from QbComposite.invalidMessage() or native input string
+ *
+ * Styling:
+ *   Call QbElements.setStyleSheet(sheet) before any elements connect.
+ *   The structural sheet from qb-styles.css is always applied.
+ *
+ * i18n:
+ *   Call QbElements.setStrings({ addItem, close, ... }) for translations.
+ *
+ * labels:
+ *   Call QbElements.setLabels({ field, option }) to map semantic keys to
+ *   display strings or DOM Nodes. Keys fall back to the raw string if unset.
+ *   Namespaces: field (qb-field name=), option (qb-option key= display text).
+ */
+// ─── Load structural stylesheet and templates ─────────────────────────────────
+//
+// Both assets live alongside this module. Loaded once at module init using
+// browser-native fetch. Shadow roots adopt the shared CSSStyleSheet instance.
+const structuralSheet = new CSSStyleSheet();
+const templates = {};
+const _css = `/*
+ * qb-styles.css
+ * Structural stylesheet for qb-* elements.
+ * FROZEN — do not modify unless explicitly instructed.
+ */
+
+:host {
+  display: block;
+}
+
+.qb-leaf {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+/* Ensure slotted content stretches to fill the slot container */
+::slotted(*) {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.qb-indent {
+  margin-left: 1rem;
+  padding-left: 0.75rem;
+  border-left: 2px solid;
+  margin-top: 0.5rem;
+}
+
+.qb-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  padding: 0.5rem;
+  border: 1px solid;
+  border-radius: 6px;
+}
+
+.qb-row > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.qb-union-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.qb-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.qb-field-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.qb-field-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.qb-actions {
+  margin-top: 0.5rem;
+}
+
+
+.qb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.qb-btn-add {
+  padding: 0 8px;
+}
+
+.qb-btn-close {
+  padding: 0 6px;
+}
+
+.qb-leaf-msg {
+  display: block;
+  font-size: 0.75rem;
+  min-height: 1lh;
+}
+`;
+const _html = `<!--
+  qb-templates.html
+  Shadow DOM templates for qb-* elements.
+  FROZEN — do not modify unless explicitly instructed.
+-->
+
+<!-- qb-union shadow root structure -->
+<template id="qb-union">
+  <div class="qb-union-header">
+    <select class="qb-select"></select>
+  </div>
+  <div class="qb-indent"></div>
+</template>
+
+<!-- qb-list shadow root structure -->
+<template id="qb-list">
+  <div role="group">
+    <div class="qb-items"></div>
+  </div>
+  <div class="qb-actions">
+    <button type="button" class="qb-btn qb-btn-add"></button>
+  </div>
+</template>
+
+<!-- qb-list item row — cloned once per item -->
+<template id="qb-list-row">
+  <div class="qb-row">
+    <div class="qb-row-content"></div>
+    <button type="button" class="qb-btn qb-btn-close"></button>
+  </div>
+</template>
+
+<!-- qb-field shadow root structure — one named slot projects the field child -->
+<template id="qb-field">
+  <div class="qb-field-row">
+    <label class="qb-field-label"></label>
+    <slot></slot>
+  </div>
+</template>
+
+<!-- qb-leaf shadow root structure — default slot projects the native input -->
+<template id="qb-leaf">
+  <slot></slot>
+  <span class="qb-leaf-msg" role="alert" aria-live="polite"></span>
+</template>
+`;
+const assetsReady = Promise.all([
+    structuralSheet.replace(_css),
+    Promise.resolve().then(() => {
+        const doc = new DOMParser().parseFromString(_html, 'text/html');
+        doc.querySelectorAll('template[id]').forEach(tmpl => {
+            templates[tmpl.id] = tmpl;
+        });
+    }),
+]).then(() => {});
+// ─── Stylesheet registry ──────────────────────────────────────────────────────
+let userSheet = null;
+function adoptSheets(shadow) {
+    shadow.adoptedStyleSheets = userSheet
+        ? [userSheet, structuralSheet]
+        : [structuralSheet];
+}
+function cloneTemplate(id) {
+    return templates[id].content.cloneNode(true);
+}
+let strings = {
+    addItem: 'Add item',
+    close: 'Close',
+    selectionInvalid: 'Selection is incomplete',
+    listInvalid: 'One or more items are invalid',
+    recordInvalid: 'One or more fields are invalid',
+};
+let labels = {};
+/** Resolve a label key to its display content, falling back to the raw key */
+function resolveLabel(ns, key) {
+    return labels[ns]?.[key] ?? key;
+}
+/** Apply a resolved label to an element — string sets textContent, Node appends */
+function applyLabel(el, value) {
+    if (typeof value === 'string') {
+        el.textContent = value;
+    }
+    else {
+        el.appendChild(value.cloneNode(true));
+    }
+}
+const QbElements = {
+    /** Expose the assetsReady promise for apps that need to await initial load */
+    ready: assetsReady,
+    setStyleSheet(sheet) { userSheet = sheet; },
+    setStrings(overrides) {
+        strings = { ...strings, ...overrides };
+    },
+    /**
+     * Supply display labels for union labels, list labels, field names, and
+     * option keys. Values can be strings or DOM Nodes (for rich content).
+     * Partial overrides are accepted per namespace.
+     *
+     * @example
+     * QbElements.setLabels({
+     *   field:  { 'field': 'Column', 'value': document.createElement('strong') },
+     *   option: { 'Simple search': 'Keyword search' },
+     * })
+     *
+     * Note: union and list labels are intentionally omitted — label nodes via
+     * <qb-field name="..."> which renders its own label.
+     */
+    setLabels(overrides) {
+        for (const ns of Object.keys(overrides)) {
+            labels[ns] = { ...labels[ns], ...overrides[ns] };
+        }
+    },
+};
+// ─── SVG icons ────────────────────────────────────────────────────────────────
+const ICON_PLUS = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M7.75 2a.75.75 0 0 1 .75.75V7h4.25a.75.75 0 0 1 0 1.5H8.5v4.25a.75.75 0 0 1-1.5 0V8.5H2.75a.75.75 0 0 1 0-1.5H7V2.75A.75.75 0 0 1 7.75 2Z"/></svg>`;
+const ICON_CLOSE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.749.749 0 0 1 1.275.326.749.749 0 0 1-.215.734L9.06 8l3.22 3.22a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L8 9.06l-3.22 3.22a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z"/></svg>`;
+// ─── QbComposite — superclass for union, list, record ────────────────────────
+// FROZEN — do not modify unless explicitly instructed.
+class QbComposite extends HTMLElement {
+    checkValidity() {
+        return this.validationNodes()
+            .map(n => n.checkValidity?.() ?? true)
+            .every(Boolean);
+    }
+    get validationMessage() {
+        return this.checkValidity() ? '' : this.invalidMessage();
+    }
+}
+// ─── <qb-option> ─────────────────────────────────────────────────────────────
+class QbOption extends HTMLElement {
+    get key() { return this.getAttribute('key') ?? ''; }
+    getTemplate() {
+        const tmpl = this.querySelector(':scope > template');
+        return tmpl ? tmpl.content : null;
+    }
+}
+customElements.define('qb-option', QbOption);
+// ─── <qb-union> ──────────────────────────────────────────────────────────────
+class QbUnion extends QbComposite {
+    constructor() {
+        super();
+        this.shadow = this.attachShadow({ mode: 'open' });
+        adoptSheets(this.shadow);
+    }
+    connectedCallback() {
+        assetsReady.then(() => this.build());
+    }
+    build() {
+        this.shadow.appendChild(cloneTemplate('qb-union'));
+        this.select = this.shadow.querySelector('.qb-select');
+        this.body = this.shadow.querySelector('.qb-indent');
+        // Label span is unused — union is labelled by its containing <qb-field>
+        this.shadow.querySelector('.qb-union-label')?.remove();
+        this.select.addEventListener('change', () => this.renderBody());
+        const options = Array.from(this.querySelectorAll(':scope > qb-option'));
+        if (!options.length)
+            return;
+        for (const opt of options) {
+            const el = document.createElement('option');
+            el.value = opt.key;
+            const resolved = resolveLabel('option', opt.key);
+            // <option> only supports text — use string or fall back to key
+            el.textContent = typeof resolved === 'string' ? resolved : opt.key;
+            this.select.appendChild(el);
+        }
+        const def = this.getAttribute('default');
+        if (def && options.some(o => o.key === def))
+            this.select.value = def;
+        this.renderBody();
+    }
+    renderBody() {
+        this.body.innerHTML = '';
+        const selected = Array.from(this.querySelectorAll(':scope > qb-option'))
+            .find(o => o.key === this.select.value);
+        if (!selected)
+            return;
+        const fragment = selected.getTemplate();
+        if (!fragment)
+            return;
+        this.body.appendChild(fragment.cloneNode(true));
+    }
+    validationNodes() {
+        const child = this.body?.firstElementChild ?? null;
+        return child ? [child] : [];
+    }
+    invalidMessage() { return strings.selectionInvalid; }
+    get value() {
+        const selected = this.select?.value ?? '';
+        const child = this.body?.firstElementChild ?? null;
+        return { selected, value: child ? child.value : null };
+    }
+}
+customElements.define('qb-union', QbUnion);
+// ─── <qb-list> ───────────────────────────────────────────────────────────────
+class QbList extends QbComposite {
+    constructor() {
+        super();
+        this.shadow = this.attachShadow({ mode: 'open' });
+        adoptSheets(this.shadow);
+        this.minItems = parseInt(this.getAttribute('min-items') ?? '0', 10);
+        this.maxItems = this.hasAttribute('max-items')
+            ? parseInt(this.getAttribute('max-items'), 10) : null;
+    }
+    connectedCallback() {
+        assetsReady.then(() => this.build());
+    }
+    build() {
+        this.shadow.appendChild(cloneTemplate('qb-list'));
+        this.itemsEl = this.shadow.querySelector('.qb-items');
+        this.addBtn = this.shadow.querySelector('.qb-btn-add');
+        this.addBtn.innerHTML = `${ICON_PLUS} ${strings.addItem}`;
+        this.addBtn.addEventListener('click', () => this.addItem());
+        const initial = Math.max(this.minItems, parseInt(this.getAttribute('initial-count') ?? '1', 10));
+        for (let i = 0; i < initial; i++)
+            this.addItem();
+    }
+    getItemTemplate() {
+        const tmpl = this.querySelector(':scope > template');
+        return tmpl ? tmpl.content : null;
+    }
+    addItem() {
+        if (this.maxItems !== null && this.itemsEl.children.length >= this.maxItems)
+            return;
+        const fragment = this.getItemTemplate();
+        if (!fragment)
+            return;
+        const rowFrag = cloneTemplate('qb-list-row');
+        const rowEl = rowFrag.querySelector('.qb-row');
+        const content = rowFrag.querySelector('.qb-row-content');
+        const closeBtn = rowFrag.querySelector('.qb-btn-close');
+        content.appendChild(fragment.cloneNode(true));
+        closeBtn.innerHTML = ICON_CLOSE;
+        closeBtn.setAttribute('aria-label', strings.close);
+        closeBtn.addEventListener('click', () => {
+            if (this.itemsEl.children.length > this.minItems) {
+                rowEl.remove();
+                this.updateAddBtn();
+            }
+        });
+        this.itemsEl.appendChild(rowEl);
+        this.updateAddBtn();
+    }
+    updateAddBtn() {
+        if (this.maxItems !== null) {
+            this.addBtn.disabled = this.itemsEl.children.length >= this.maxItems;
+        }
+    }
+    validationNodes() {
+        return Array.from(this.itemsEl?.children ?? []).flatMap(row => {
+            const child = row.querySelector('.qb-row-content')?.firstElementChild;
+            return child ? [child] : [];
+        });
+    }
+    invalidMessage() { return strings.listInvalid; }
+    get value() {
+        return this.validationNodes().map(n => n.value);
+    }
+}
+customElements.define('qb-list', QbList);
+// ─── <qb-field> ──────────────────────────────────────────────────────────────
+//
+// Each qb-field builds its own shadow DOM: a labeled row with a default slot.
+// The label uses a class-scoped static counter for unique IDs — no UUID needed.
+// QbRecord simply iterates its qb-field children; layout logic lives here.
+class QbField extends HTMLElement {
+    constructor() {
+        super();
+        this.shadow = this.attachShadow({ mode: 'open' });
+        adoptSheets(this.shadow);
+        this.labelId = `qb-field-label-${QbField.count++}`;
+        this.fieldName = this.getAttribute('name') ?? '';
+    }
+    connectedCallback() {
+        assetsReady.then(() => this.build());
+    }
+    build() {
+        this.shadow.appendChild(cloneTemplate('qb-field'));
+        const labelEl = this.shadow.querySelector('.qb-field-label');
+        labelEl.id = this.labelId;
+        applyLabel(labelEl, resolveLabel('field', this.fieldName));
+        // Associate slotted child with the label
+        for (const child of Array.from(this.children)) {
+            child.setAttribute('aria-labelledby', this.labelId);
+        }
+    }
+}
+QbField.count = 0;
+customElements.define('qb-field', QbField);
+// ─── <qb-record> ─────────────────────────────────────────────────────────────
+//
+// QbRecord collects its qb-field children for value/validity.
+// Layout is fully delegated to QbField — record just groups them.
+class QbRecord extends QbComposite {
+    constructor() {
+        super();
+        this.shadow = this.attachShadow({ mode: 'open' });
+        adoptSheets(this.shadow);
+    }
+    connectedCallback() {
+        assetsReady.then(() => this.build());
+    }
+    build() {
+        this.shadow.innerHTML = '';
+        const container = document.createElement('div');
+        container.className = 'qb-fields';
+        // Each qb-field handles its own shadow DOM and labeling.
+        // Record projects them into a container via a default slot.
+        const slot = document.createElement('slot');
+        container.appendChild(slot);
+        this.shadow.appendChild(container);
+    }
+    fields() {
+        return Array.from(this.querySelectorAll(':scope > qb-field'));
+    }
+    validationNodes() {
+        return this.fields().flatMap(f => Array.from(f.children));
+    }
+    invalidMessage() { return strings.recordInvalid; }
+    get value() {
+        const result = {};
+        for (const field of this.fields()) {
+            const child = field.firstElementChild;
+            result[field.fieldName] = child ? child.value : null;
+        }
+        return result;
+    }
+}
+customElements.define('qb-record', QbRecord);
+// ─── <qb-leaf> ───────────────────────────────────────────────────────────────
+// FROZEN — do not modify unless explicitly instructed.
+class QbLeaf extends HTMLElement {
+    constructor() {
+        super();
+        this.msgId = `qb-msg-${QbLeaf.count++}`;
+        this.shadow = this.attachShadow({ mode: 'open' });
+        adoptSheets(this.shadow);
+    }
+    connectedCallback() {
+        this.classList.add('qb-leaf');
+        assetsReady.then(() => this.build());
+    }
+    build() {
+        this.shadow.appendChild(cloneTemplate('qb-leaf'));
+        this.msgEl = this.shadow.querySelector('.qb-leaf-msg');
+        this.msgEl.id = this.msgId;
+        const slot = this.shadow.querySelector('slot');
+        slot.addEventListener('slotchange', () => this.wireInput());
+        this.wireInput();
+    }
+    wireInput() {
+        const input = this.firstElementChild;
+        if (!input)
+            return;
+        input.setAttribute('aria-describedby', this.msgId);
+        const updateMsg = () => {
+            this.msgEl.textContent = this.checkValidity() ? '' : this.validationMessage;
+        };
+        input.addEventListener('invalid', () => { this.msgEl.textContent = this.validationMessage; });
+        input.addEventListener('input', updateMsg);
+        input.addEventListener('change', updateMsg);
+    }
+    get value() {
+        return this.firstElementChild?.value ?? null;
+    }
+    get validationMessage() {
+        return this.firstElementChild?.validationMessage ?? '';
+    }
+    checkValidity() {
+        return this.firstElementChild?.checkValidity?.() ?? true;
+    }
+}
+QbLeaf.count = 0;
+customElements.define('qb-leaf', QbLeaf);
+
+QbElements.setLabels({
+  field:  { 'Query type': 'Search by', 'field': 'Column', 'operator': 'Condition', 'value': 'Value' },
+  option: { 'Simple search': 'Keyword', 'Filter list': 'Filters', 'By ID': 'ID' },
+})
+
+document.getElementById('submit').addEventListener('click', () => {
+  const root = document.getElementById('root')
+  const msg  = document.getElementById('validity-msg')
+  const out  = document.getElementById('output')
+
+  if (!root.checkValidity()) {
+    msg.textContent = root.validationMessage
+    out.hidden = true
+    return
+  }
+
+  msg.textContent = ''
+  out.textContent = JSON.stringify(root.value, null, 2)
+  out.hidden = false
+})
+</script>
+</body>
+</html>

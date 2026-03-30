@@ -1,0 +1,36 @@
+{
+  "name": "@viliaapro/qb-elements",
+  "version": "0.2.0",
+  "description": "Query builder web components — union, list, record",
+  "type": "module",
+  "main": "./dist/qb-elements.js",
+  "types": "./dist/qb-elements.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/qb-elements.js",
+      "types": "./dist/qb-elements.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "demo.html"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "build:demo": "esbuild src/qb-elements.ts --bundle --format=iife --global-name=QbElementsLib --outfile=dist/qb-elements.iife.js",
+    "dev": "tsup --watch"
+  },
+  "keywords": [
+    "web-components",
+    "custom-elements",
+    "query-builder",
+    "form"
+  ],
+  "author": "viliaapro",
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.21.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0"
+  }
+}

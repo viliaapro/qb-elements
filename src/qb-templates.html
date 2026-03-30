@@ -1,0 +1,45 @@
+<!--
+  qb-templates.html
+  Shadow DOM templates for qb-* elements.
+  FROZEN — do not modify unless explicitly instructed.
+-->
+
+<!-- qb-union shadow root structure -->
+<template id="qb-union">
+  <div class="qb-union-header">
+    <select class="qb-select"></select>
+  </div>
+  <div class="qb-indent"></div>
+</template>
+
+<!-- qb-list shadow root structure -->
+<template id="qb-list">
+  <div role="group">
+    <div class="qb-items"></div>
+  </div>
+  <div class="qb-actions">
+    <button type="button" class="qb-btn qb-btn-add"></button>
+  </div>
+</template>
+
+<!-- qb-list item row — cloned once per item -->
+<template id="qb-list-row">
+  <div class="qb-row">
+    <div class="qb-row-content"></div>
+    <button type="button" class="qb-btn qb-btn-close"></button>
+  </div>
+</template>
+
+<!-- qb-field shadow root structure — one named slot projects the field child -->
+<template id="qb-field">
+  <div class="qb-field-row">
+    <label class="qb-field-label"></label>
+    <slot></slot>
+  </div>
+</template>
+
+<!-- qb-leaf shadow root structure — default slot projects the native input -->
+<template id="qb-leaf">
+  <slot></slot>
+  <span class="qb-leaf-msg" role="alert" aria-live="polite"></span>
+</template>
