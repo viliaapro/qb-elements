@@ -16,10 +16,6 @@
 <body>
 <h1>Query Builder</h1>
 
-<!--
-  Union label text is now prepended to the first option key via setLabels,
-  demonstrating how to surface "Query type" inside the select itself.
--->
 <qb-record>
   <qb-field name="Query type">
     <qb-union id="root" default="Simple search">
@@ -103,9 +99,9 @@
  *   Call QbElements.setStrings({ addItem, close, ... }) for translations.
  *
  * labels:
- *   Call QbElements.setLabels({ field, option }) to map semantic keys to
- *   display strings or DOM Nodes. Keys fall back to the raw string if unset.
- *   Namespaces: field (qb-field name=), option (qb-option key= display text).
+ *   Call QbElements.setLabels({ field, option }) to map semantic keys.
+ *   Values: string | Node | { display?: string|Node, aria?: string }
+ *   display falls back to field name; aria left unset if absent.
  */
 // ─── Load structural stylesheet and templates ─────────────────────────────────
 //
@@ -214,7 +210,7 @@ const _html = `<!--
   FROZEN — do not modify unless explicitly instructed.
 -->
 
-<!-- qb-union shadow root structure -->
+<!-- qb-union: no host role — semantics come from the native <select> inside -->
 <template id="qb-union">
   <div class="qb-union-header">
     <select class="qb-select"></select>
@@ -222,9 +218,9 @@ const _html = `<!--
   <div class="qb-indent"></div>
 </template>
 
-<!-- qb-list shadow root structure -->
+<!-- qb-list: list role — homogeneous sequence of items -->
 <template id="qb-list">
-  <div role="group">
+  <div role="list">
     <div class="qb-items"></div>
   </div>
   <div class="qb-actions">
@@ -232,15 +228,22 @@ const _html = `<!--
   </div>
 </template>
 
-<!-- qb-list item row — cloned once per item -->
+<!-- qb-list item row: listitem role — cloned once per item -->
 <template id="qb-list-row">
-  <div class="qb-row">
+  <div class="qb-row" role="listitem">
     <div class="qb-row-content"></div>
     <button type="button" class="qb-btn qb-btn-close"></button>
   </div>
 </template>
 
-<!-- qb-field shadow root structure — one named slot projects the field child -->
+<!-- qb-record: group role — groups named fields -->
+<template id="qb-record">
+  <div class="qb-fields" role="group">
+    <slot></slot>
+  </div>
+</template>
+
+<!-- qb-field: no role — label + slot, labeling via aria-labelledby -->
 <template id="qb-field">
   <div class="qb-field-row">
     <label class="qb-field-label"></label>
@@ -248,7 +251,7 @@ const _html = `<!--
   </div>
 </template>
 
-<!-- qb-leaf shadow root structure — default slot projects the native input -->
+<!-- qb-leaf: no host role — .qb-leaf-msg already carries role="alert" -->
 <template id="qb-leaf">
   <slot></slot>
   <span class="qb-leaf-msg" role="alert" aria-live="polite"></span>
@@ -281,11 +284,27 @@ let strings = {
     recordInvalid: 'One or more fields are invalid',
 };
 let labels = {};
-/** Resolve a label key to its display content, falling back to the raw key */
-function resolveLabel(ns, key) {
-    return labels[ns]?.[key] ?? key;
+/** Extract display value from a QbLabelEntry, falling back to the raw key */
+function resolveDisplay(ns, key) {
+    const entry = labels[ns]?.[key];
+    if (entry === undefined)
+        return key;
+    if (typeof entry === 'string' || entry instanceof Node)
+        return entry;
+    return entry.display ?? key;
 }
-/** Apply a resolved label to an element — string sets textContent, Node appends */
+/** Extract aria string from a QbLabelEntry.
+ *  Only returns a value when entry.aria is explicitly set.
+ *  String and Node entries leave aria-label unset — the browser derives the
+ *  accessible name from visible content, which is preferable. */
+function resolveAria(ns, key) {
+    const entry = labels[ns]?.[key];
+    if (entry !== null && typeof entry === 'object' && !(entry instanceof Node)) {
+        return entry.aria;
+    }
+    return undefined;
+}
+/** Apply display content to an element — string sets textContent, Node appends */
 function applyLabel(el, value) {
     if (typeof value === 'string') {
         el.textContent = value;
@@ -308,17 +327,18 @@ const QbElements = {
      *
      * @example
      * QbElements.setLabels({
-     *   field:  { 'field': 'Column', 'value': document.createElement('strong') },
-     *   option: { 'Simple search': 'Keyword search' },
+     *   field: {
+     *     'field': 'Column',                          // string: display + aria
+     *     'value': { display: myIcon, aria: 'Value' } // object: separate display/aria
+     *   },
+     *   option: { 'Simple search': 'Keyword' },
      * })
-     *
-     * Note: union and list labels are intentionally omitted — label nodes via
-     * <qb-field name="..."> which renders its own label.
      */
     setLabels(overrides) {
-        for (const ns of Object.keys(overrides)) {
-            labels[ns] = { ...labels[ns], ...overrides[ns] };
-        }
+        if (overrides.field)
+            labels.field = { ...labels.field, ...overrides.field };
+        if (overrides.option)
+            labels.option = { ...labels.option, ...overrides.option };
     },
 };
 // ─── SVG icons ────────────────────────────────────────────────────────────────
@@ -359,8 +379,6 @@ class QbUnion extends QbComposite {
         this.shadow.appendChild(cloneTemplate('qb-union'));
         this.select = this.shadow.querySelector('.qb-select');
         this.body = this.shadow.querySelector('.qb-indent');
-        // Label span is unused — union is labelled by its containing <qb-field>
-        this.shadow.querySelector('.qb-union-label')?.remove();
         this.select.addEventListener('change', () => this.renderBody());
         const options = Array.from(this.querySelectorAll(':scope > qb-option'));
         if (!options.length)
@@ -368,9 +386,9 @@ class QbUnion extends QbComposite {
         for (const opt of options) {
             const el = document.createElement('option');
             el.value = opt.key;
-            const resolved = resolveLabel('option', opt.key);
+            const display = resolveDisplay('option', opt.key);
             // <option> only supports text — use string or fall back to key
-            el.textContent = typeof resolved === 'string' ? resolved : opt.key;
+            el.textContent = typeof display === 'string' ? display : opt.key;
             this.select.appendChild(el);
         }
         const def = this.getAttribute('default');
@@ -487,10 +505,12 @@ class QbField extends HTMLElement {
         this.shadow.appendChild(cloneTemplate('qb-field'));
         const labelEl = this.shadow.querySelector('.qb-field-label');
         labelEl.id = this.labelId;
-        applyLabel(labelEl, resolveLabel('field', this.fieldName));
-        // Associate slotted child with the label
+        applyLabel(labelEl, resolveDisplay('field', this.fieldName));
+        const ariaStr = resolveAria('field', this.fieldName);
         for (const child of Array.from(this.children)) {
             child.setAttribute('aria-labelledby', this.labelId);
+            if (ariaStr)
+                child.setAttribute('aria-label', ariaStr);
         }
     }
 }
@@ -511,13 +531,7 @@ class QbRecord extends QbComposite {
     }
     build() {
         this.shadow.innerHTML = '';
-        const container = document.createElement('div');
-        container.className = 'qb-fields';
-        // Each qb-field handles its own shadow DOM and labeling.
-        // Record projects them into a container via a default slot.
-        const slot = document.createElement('slot');
-        container.appendChild(slot);
-        this.shadow.appendChild(container);
+        this.shadow.appendChild(cloneTemplate('qb-record'));
     }
     fields() {
         return Array.from(this.querySelectorAll(':scope > qb-field'));
@@ -547,6 +561,7 @@ class QbLeaf extends HTMLElement {
     }
     connectedCallback() {
         this.classList.add('qb-leaf');
+        this.setAttribute('role', 'alert');
         assetsReady.then(() => this.build());
     }
     build() {
@@ -591,13 +606,11 @@ document.getElementById('submit').addEventListener('click', () => {
   const root = document.getElementById('root')
   const msg  = document.getElementById('validity-msg')
   const out  = document.getElementById('output')
-
   if (!root.checkValidity()) {
     msg.textContent = root.validationMessage
     out.hidden = true
     return
   }
-
   msg.textContent = ''
   out.textContent = JSON.stringify(root.value, null, 2)
   out.hidden = false

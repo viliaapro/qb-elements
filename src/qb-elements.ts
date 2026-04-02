@@ -29,9 +29,9 @@
  *   Call QbElements.setStrings({ addItem, close, ... }) for translations.
  *
  * labels:
- *   Call QbElements.setLabels({ field, option }) to map semantic keys to
- *   display strings or DOM Nodes. Keys fall back to the raw string if unset.
- *   Namespaces: field (qb-field name=), option (qb-option key= display text).
+ *   Call QbElements.setLabels({ field, option }) to map semantic keys.
+ *   Values: string | Node | { display?: string|Node, aria?: string }
+ *   display falls back to field name; aria left unset if absent.
  */
 
 // ─── Load structural stylesheet and templates ─────────────────────────────────
@@ -94,22 +94,42 @@ let strings: QbStrings = {
   recordInvalid:    'One or more fields are invalid',
 }
 
-export type QbLabelValue = string | Node
+/** A label entry can be:
+ *   - a plain string or Node (used for display; string also used for aria)
+ *   - an object with optional display (string|Node) and optional aria (string)
+ *     display falls back to the field name; aria is left unset if absent
+ */
+export type QbLabelEntry = string | Node | { display?: string | Node, aria?: string }
 
 export type QbLabels = {
-  field?:  Record<string, QbLabelValue>
-  option?: Record<string, QbLabelValue>
+  field?:  Record<string, QbLabelEntry>
+  option?: Record<string, QbLabelEntry>
 }
 
 let labels: QbLabels = {}
 
-/** Resolve a label key to its display content, falling back to the raw key */
-function resolveLabel(ns: keyof QbLabels, key: string): QbLabelValue {
-  return labels[ns]?.[key] ?? key
+/** Extract display value from a QbLabelEntry, falling back to the raw key */
+function resolveDisplay(ns: keyof QbLabels, key: string): string | Node {
+  const entry = labels[ns]?.[key]
+  if (entry === undefined) return key
+  if (typeof entry === 'string' || entry instanceof Node) return entry
+  return entry.display ?? key
 }
 
-/** Apply a resolved label to an element — string sets textContent, Node appends */
-function applyLabel(el: Element, value: QbLabelValue): void {
+/** Extract aria string from a QbLabelEntry.
+ *  Only returns a value when entry.aria is explicitly set.
+ *  String and Node entries leave aria-label unset — the browser derives the
+ *  accessible name from visible content, which is preferable. */
+function resolveAria(ns: keyof QbLabels, key: string): string | undefined {
+  const entry = labels[ns]?.[key]
+  if (entry !== null && typeof entry === 'object' && !(entry instanceof Node)) {
+    return entry.aria
+  }
+  return undefined
+}
+
+/** Apply display content to an element — string sets textContent, Node appends */
+function applyLabel(el: Element, value: string | Node): void {
   if (typeof value === 'string') {
     el.textContent = value
   } else {
@@ -134,17 +154,16 @@ export const QbElements = {
    *
    * @example
    * QbElements.setLabels({
-   *   field:  { 'field': 'Column', 'value': document.createElement('strong') },
-   *   option: { 'Simple search': 'Keyword search' },
+   *   field: {
+   *     'field': 'Column',                          // string: display + aria
+   *     'value': { display: myIcon, aria: 'Value' } // object: separate display/aria
+   *   },
+   *   option: { 'Simple search': 'Keyword' },
    * })
-   *
-   * Note: union and list labels are intentionally omitted — label nodes via
-   * <qb-field name="..."> which renders its own label.
    */
   setLabels(overrides: QbLabels): void {
-    for (const ns of Object.keys(overrides) as (keyof QbLabels)[]) {
-      labels[ns] = { ...labels[ns], ...overrides[ns] }
-    }
+    if (overrides.field)  labels.field  = { ...labels.field,  ...overrides.field }
+    if (overrides.option) labels.option = { ...labels.option, ...overrides.option }
   },
 }
 
@@ -206,9 +225,6 @@ export class QbUnion extends QbComposite {
     this.select = this.shadow.querySelector('.qb-select')!
     this.body   = this.shadow.querySelector('.qb-indent')!
 
-    // Label span is unused — union is labelled by its containing <qb-field>
-    this.shadow.querySelector('.qb-union-label')?.remove()
-
     this.select.addEventListener('change', () => this.renderBody())
 
     const options = Array.from(this.querySelectorAll(':scope > qb-option')) as QbOption[]
@@ -217,9 +233,9 @@ export class QbUnion extends QbComposite {
     for (const opt of options) {
       const el = document.createElement('option')
       el.value = opt.key
-      const resolved = resolveLabel('option', opt.key)
+      const display = resolveDisplay('option', opt.key)
       // <option> only supports text — use string or fall back to key
-      el.textContent = typeof resolved === 'string' ? resolved : opt.key
+      el.textContent = typeof display === 'string' ? display : opt.key
       this.select.appendChild(el)
     }
 
@@ -373,11 +389,12 @@ export class QbField extends HTMLElement {
 
     const labelEl = this.shadow.querySelector('.qb-field-label')!
     labelEl.id = this.labelId
-    applyLabel(labelEl, resolveLabel('field', this.fieldName))
+    applyLabel(labelEl, resolveDisplay('field', this.fieldName))
 
-    // Associate slotted child with the label
+    const ariaStr = resolveAria('field', this.fieldName)
     for (const child of Array.from(this.children)) {
       child.setAttribute('aria-labelledby', this.labelId)
+      if (ariaStr) child.setAttribute('aria-label', ariaStr)
     }
   }
 }
@@ -404,14 +421,7 @@ export class QbRecord extends QbComposite {
 
   private build(): void {
     this.shadow.innerHTML = ''
-    const container = document.createElement('div')
-    container.className = 'qb-fields'
-
-    // Each qb-field handles its own shadow DOM and labeling.
-    // Record projects them into a container via a default slot.
-    const slot = document.createElement('slot')
-    container.appendChild(slot)
-    this.shadow.appendChild(container)
+    this.shadow.appendChild(cloneTemplate('qb-record'))
   }
 
   private fields(): QbField[] {
@@ -454,6 +464,7 @@ export class QbLeaf extends HTMLElement {
 
   connectedCallback(): void {
     this.classList.add('qb-leaf')
+    this.setAttribute('role', 'alert')
     assetsReady.then(() => this.build())
   }
 

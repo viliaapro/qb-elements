@@ -4,7 +4,7 @@
   FROZEN — do not modify unless explicitly instructed.
 -->
 
-<!-- qb-union shadow root structure -->
+<!-- qb-union: no host role — semantics come from the native <select> inside -->
 <template id="qb-union">
   <div class="qb-union-header">
     <select class="qb-select"></select>
@@ -12,9 +12,9 @@
   <div class="qb-indent"></div>
 </template>
 
-<!-- qb-list shadow root structure -->
+<!-- qb-list: list role — homogeneous sequence of items -->
 <template id="qb-list">
-  <div role="group">
+  <div role="list">
     <div class="qb-items"></div>
   </div>
   <div class="qb-actions">
@@ -22,15 +22,22 @@
   </div>
 </template>
 
-<!-- qb-list item row — cloned once per item -->
+<!-- qb-list item row: listitem role — cloned once per item -->
 <template id="qb-list-row">
-  <div class="qb-row">
+  <div class="qb-row" role="listitem">
     <div class="qb-row-content"></div>
     <button type="button" class="qb-btn qb-btn-close"></button>
   </div>
 </template>
 
-<!-- qb-field shadow root structure — one named slot projects the field child -->
+<!-- qb-record: group role — groups named fields -->
+<template id="qb-record">
+  <div class="qb-fields" role="group">
+    <slot></slot>
+  </div>
+</template>
+
+<!-- qb-field: no role — label + slot, labeling via aria-labelledby -->
 <template id="qb-field">
   <div class="qb-field-row">
     <label class="qb-field-label"></label>
@@ -38,7 +45,7 @@
   </div>
 </template>
 
-<!-- qb-leaf shadow root structure — default slot projects the native input -->
+<!-- qb-leaf: no host role — .qb-leaf-msg already carries role="alert" -->
 <template id="qb-leaf">
   <slot></slot>
   <span class="qb-leaf-msg" role="alert" aria-live="polite"></span>

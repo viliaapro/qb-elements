@@ -1,6 +1,6 @@
 {
   "name": "@viliaapro/qb-elements",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Query builder web components — union, list, record",
   "type": "module",
   "main": "./dist/qb-elements.js",

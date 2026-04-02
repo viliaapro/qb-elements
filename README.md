@@ -57,7 +57,7 @@ root.value  // { selected: 'Simple search', value: 'hello' }
 A discriminated sum. Renders a `<select>` from its `<qb-option>` children and shows the selected option's content below.
 
 ```html
-<qb-union label="Search by" default="Name">
+<qb-union default="Name">
   <qb-option key="Name">
     <template><input type="text" /></template>
   </qb-option>
@@ -103,7 +103,6 @@ A homogeneous sequence. Stamps out clones of its `<template>` child. Each item g
 
 | Attribute | Default | Description |
 |---|---|---|
-| `label` | — | Label shown above the list |
 | `min-items` | `0` | Minimum items; remove is disabled at this floor |
 | `max-items` | — | Maximum items; add is disabled at this ceiling |
 | `initial-count` | `1` | Items rendered on connect |
@@ -240,10 +239,9 @@ Internal CSS class names for styling hooks:
 | Class | Element | Purpose |
 |---|---|---|
 | `qb-select` | `<qb-union>` | the variant dropdown |
-| `qb-union-label` | `<qb-union>` | label before the dropdown |
-| `qb-label` | `<qb-list>` | label above the list |
-| `qb-btn` | `<qb-list>` | add and remove buttons |
-| `qb-field-label` | `<qb-record>` | field name labels |
+| `qb-btn qb-btn-add` | `<qb-list>` | add button |
+| `qb-btn qb-btn-close` | `<qb-list>` | close button per item |
+| `qb-field-label` | `<qb-field>` | field name label |
 | `qb-leaf-msg` | `<qb-leaf>` | validation message span |
 
 ---
@@ -304,40 +302,43 @@ Elements compose arbitrarily deep:
 
 ## Labels
 
-Semantic keys in the grammar — `name` attributes on `<qb-field>` and `key` attributes on `<qb-option>` — are separate from their display strings. A label registry maps keys to display content, supporting both plain strings and DOM nodes for rich content.
+Semantic keys — `name` on `<qb-field>` and `key` on `<qb-option>` — are separate from their display strings. A label registry maps keys to display content.
 
-Neither `<qb-union>` nor `<qb-list>` has its own label. The standard pattern is to wrap them in a `<qb-field>`, which provides the label for the whole field. This follows the same convention as HTML form controls: the label belongs to the field container, not to the control itself.
+Each entry can be a plain string, a DOM Node, or an object with separate `display` and `aria` properties:
 
 ```js
 QbElements.setLabels({
-  field:  { 'field': 'Column', 'operator': 'Condition', 'value': 'Search for' },
-  option: { 'Simple search': 'Keyword', 'Filter list': 'Advanced', 'By ID': 'ID' },
+  field: {
+    'field':    'Column',                              // string: display and aria
+    'operator': { display: 'Condition' },              // object: display only
+    'value':    { display: valueIcon, aria: 'Value' }, // object: Node display + aria string
+  },
+  option: {
+    'Simple search': 'Keyword',
+    'Filter list':   'Filters',
+    'By ID':         'ID',
+  },
 })
 ```
 
-Values can be plain strings or DOM `Node` objects for rich content:
+**Display resolution** — for each key, the display value is resolved in this order:
 
-```js
-const icon = document.createElement('span')
-icon.innerHTML = '🔍 Column'
+1. Entry's `display` property (if object form)
+2. The entry itself if string or Node
+3. Raw key as final fallback
 
-QbElements.setLabels({
-  field: { 'field': icon },
-})
-```
+**Aria resolution** — for `aria-label` attributes, resolved in this order:
 
-When a key has no registered label, the raw key string is used as a fallback — so the grammar works out of the box without any registration.
+1. Entry's `aria` property (if object form)
+2. The entry itself if it is a string
+3. Left unset — no fallback to raw key (avoids exposing code-level identifiers to assistive technology)
 
-Labels are namespaced to prevent collisions:
+Labels are namespaced to prevent collisions between field names and option keys:
 
 | Namespace | Resolves keys from |
 |---|---|
 | `field` | `name` attribute on `<qb-field>` |
 | `option` | `key` attribute on `<qb-option>` (display text only — `.value` always returns the raw key) |
-
-Note: `aria-label` and `<option>` text only accept plain strings. When a Node is registered for those sites, the raw key is used for the accessible string while the Node renders visually.
-
----
 
 ## i18n
 
@@ -367,11 +368,23 @@ QbElements.setStrings({
 
 Elements are built with screen reader support in mind.
 
-`<qb-union>` — the variant `<select>` is labelled by its containing `<qb-field>` via `aria-labelledby` on slotted content.
+**Roles** — structural roles are set in shadow DOM templates:
 
-`<qb-list>` — the list region has `role="group"`. Labeling is inherited from the containing `<qb-field>` via `aria-labelledby` on slotted content — no duplicate label is rendered.
+| Element | Role |
+|---|---|
+| `<qb-record>` | `group` — groups related fields |
+| `<qb-list>` | `list` — homogeneous sequence |
+| list item row | `listitem` |
 
-`<qb-record>` — each field's label is associated with its child node via `aria-labelledby`, using a generated unique id per field.
+`<qb-union>` and `<qb-field>` have no explicit host role — their semantics come from the native elements inside them.
+
+**Labeling** — `<qb-field>` generates a unique `id` for its label element and sets `aria-labelledby` on each slotted child, associating the visible label text with the control.
+
+`aria-label` is only set when a `QbLabelEntry` object with an explicit `aria` property is registered for that key via `setLabels`. In all other cases it is left unset, so the browser derives the accessible name from visible content. This follows the guidance from MDN's [Accessible name](https://developer.mozilla.org/en-US/docs/Glossary/Accessible_name):
+
+> It is best to use visible text as the accessible name. Many elements, including `<a>`, `<td>` and `<button>`, can get their accessible name from their content. For example, given `<a href="foo.html">Bar</a>`, the accessible name of this hyperlink is "Bar."
+
+`aria-label` should therefore only be supplied when the visible label is a Node whose text content is insufficient or absent — for example, an icon-only label.
 
 `<qb-leaf>` — the validation message span has `role="alert"` and `aria-live="polite"` so screen readers announce it when it appears. The wrapped input has `aria-describedby` pointing to the message span.
 
