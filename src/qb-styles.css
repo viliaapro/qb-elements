@@ -4,20 +4,9 @@
  * FROZEN — do not modify unless explicitly instructed.
  */
 
-:host {
-  display: block;
-}
-
 .qb-leaf {
   display: flex;
   flex-direction: column;
-  width: 100%;
-}
-
-/* Ensure slotted content stretches to fill the slot container */
-::slotted(*) {
-  width: 100%;
-  box-sizing: border-box;
 }
 
 .qb-indent {
@@ -44,7 +33,6 @@
 
 .qb-union-header {
   display: flex;
-  align-items: center;
   gap: 0.5rem;
   margin-bottom: 0.5rem;
 }
