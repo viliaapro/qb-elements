@@ -28,7 +28,6 @@
 
 .qb-row > :first-child {
   flex: 1;
-  min-width: 0;
 }
 
 .qb-union-header {
@@ -57,7 +56,6 @@
 .qb-actions {
   margin-top: 0.5rem;
 }
-
 
 .qb-btn {
   display: inline-flex;
